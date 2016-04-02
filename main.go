@@ -37,41 +37,10 @@ func init() {
 func main() {
 	trainDataset := os.Args[1]
 	testDataset := os.Args[2]
-	readAndTrainDataset(trainDataset)
-	// dataset := readAndTrainDataset(trainDataset)
-	// predictFromDataset(dataset)
-	file, _ := os.Open(testDataset)
-	predictFrom(file)
-}
 
-func predictFromDataset(dataset []*TrainDataset) {
-	// dumpIV()
-	for _, item := range dataset {
-		brandID, score := predictBrand(item.Title)
-		fmt.Printf("%d\t%d\t%v\t%v\n", item.Brand, brandID, score, brandID == item.Brand)
-	}
-}
-
-func dumpIV() {
-	for word, brandIds := range WordToBrandMap {
-		fmt.Printf("%s - %v\n", word, brandIds)
-	}
-}
-
-type Output struct {
-	BrandId int
-	Seq     int
-}
-
-type Input struct {
-	Title string
-	Seq   int
-}
-
-func predictFrom(input io.Reader) {
 	Workers := 1000
-	jobsChannel := make(chan Input, 5*Workers)
-	resultsChannel := make(chan Output, 5*Workers)
+	jobsChannel := make(chan Input)
+	resultsChannel := make(chan Output)
 
 	var wg sync.WaitGroup
 
@@ -80,31 +49,75 @@ func predictFrom(input io.Reader) {
 	}
 	go outputWriter(wg, resultsChannel)
 
+	// LEARNING STARTS
+	readAndTrainDataset(trainDataset)
+	// LEARNING ENDS
+
+	// PREDICTION STARTS
+	// dataset := readAndTrainDataset(trainDataset)
+	// predictFromDataset(dataset, jobsChannel)
+	file, _ := os.Open(testDataset)
+	predictFrom(file, jobsChannel)
+	// PREDICTION ENDS
+
+	for count := 0; count < Workers; count++ {
+		jobsChannel <- Input{Seq: -1}
+	}
+	resultsChannel <- Output{Seq: -1}
+	wg.Wait()
+	close(jobsChannel)
+	close(resultsChannel)
+}
+
+func predictFromDataset(dataset []*TrainDataset, jobsChannel chan Input) {
+	var seq = 0
+	for _, item := range dataset {
+		seq++
+		if seq > 0 && seq%10000 == 0 {
+			fmt.Printf("[DEBUG] Processed %d product titles so far\n", seq)
+		}
+		input := Input{
+			Title:         item.Title,
+			Seq:           seq,
+			ExpectedBrand: item.Brand,
+		}
+		jobsChannel <- input
+		// brandID, score := predictBrand(item.Title)
+		// 	fmt.Printf("%d\t%d\t%v\t%v\n", item.Brand, brandID, score, brandID == item.Brand)
+	}
+}
+
+type Output struct {
+	BrandId       int
+	Seq           int
+	ExpectedBrand int
+}
+
+type Input struct {
+	Title         string
+	Seq           int
+	ExpectedBrand int
+}
+
+func predictFrom(input io.Reader, jobsChannel chan Input) {
 	scanner := bufio.NewScanner(input)
 	var seq = 0
 	for scanner.Scan() {
 		seq++
+		if seq > 0 && seq%10000 == 0 {
+			fmt.Printf("[DEBUG] Processed %d product titles so far\n", seq)
+		}
 		input := Input{
 			Title: scanner.Text(),
 			Seq:   seq,
 		}
 		jobsChannel <- input
-		if seq > 0 && seq%10000 == 0 {
-			fmt.Printf("[DEBUG] Processed %d product titles so far\n", seq)
-		}
 	}
-	for count := 0; count < Workers; count++ {
-		jobsChannel <- Input{Seq: -1}
-	}
-	resultsChannel <- Output{Seq: -1}
 
 	fmt.Printf("[DEBUG] Processed %d product titles in total\n", seq)
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, "reading standard input:", err)
 	}
-	wg.Wait()
-	close(jobsChannel)
-	close(resultsChannel)
 }
 
 func outputWriter(wg sync.WaitGroup, resultsChannel chan Output) {
@@ -117,7 +130,8 @@ func outputWriter(wg sync.WaitGroup, resultsChannel chan Output) {
 				running = false
 				wg.Done()
 			} else {
-				fmt.Printf("%d\t%d\n", output.BrandId, output.Seq)
+				// fmt.Printf("%d\t%d\n", output.BrandId, output.Seq)
+				fmt.Printf("%d\t%d\t%v\t%v\n", output.BrandId, output.ExpectedBrand, output.Seq, output.BrandId == output.ExpectedBrand)
 			}
 		}
 	}
@@ -134,8 +148,9 @@ func brandPredictWorker(jobs <-chan Input, output chan<- Output) {
 				brandID, _ := predictBrand(job.Title)
 				// fmt.Printf("%d\t%v\n", brandID, score)
 				op := Output{
-					BrandId: brandID,
-					Seq:     job.Seq,
+					BrandId:       brandID,
+					Seq:           job.Seq,
+					ExpectedBrand: job.ExpectedBrand,
 				}
 				output <- op
 			}
