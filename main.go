@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"container/heap"
 
@@ -18,7 +20,7 @@ const (
 	// MaxNgrams - maximum ngrams to create for titles
 	MaxNgrams = 2
 	// MaxItemsInBag - maximum number of most occuring items to keep in each bag
-	MaxItemsInBag = 100
+	MaxItemsInBag = 250
 )
 
 // BrandTokens - Contains the Bag of words of all brands as branId -> sets.Set
@@ -33,13 +35,16 @@ func init() {
 }
 
 func main() {
-	// readAndTrainDataset("datasets/classification_train.tsv")
-	dataset := readAndTrainDataset("datasets/xaa")
+	trainDataset := os.Args[1]
+	testDataset := os.Args[2]
+	readAndTrainDataset(trainDataset)
+	// dataset := readAndTrainDataset("datasets/classification_train.tsv")
 	// dataset := readAndTrainDataset("datasets/xaa_small")
-	predictFromDataset(dataset)
+	// length := len(dataset)
+	// predictFromDataset(dataset)
 	// predictFrom(os.Stdin)
-	// file, _ := os.Open("/tmp/train-accuracy")
-	// predictFrom(file)
+	file, _ := os.Open(testDataset)
+	predictFrom(file)
 	// fmt.Printf("%v\n", BrandTokens)
 }
 
@@ -57,17 +62,90 @@ func dumpIV() {
 	}
 }
 
-// func predictFrom(input io.Reader) {
-// 	scanner := bufio.NewScanner(input)
-// 	for scanner.Scan() {
-// 		brandID, score := predictBrand(scanner.Text())
-// 		fmt.Printf("%d\t%v\n", brandID, score)
-// 		// fmt.Printf("Most frequent word in the brand(%d) is %s\n", brandID, BrandTokens[brandID].MaxOccuringItem())
-// 	}
-// 	if err := scanner.Err(); err != nil {
-// 		fmt.Fprintln(os.Stderr, "reading standard input:", err)
-// 	}
-// }
+type Output struct {
+	BrandId int
+	Seq     int
+}
+
+type Input struct {
+	Title string
+	Seq   int
+}
+
+func predictFrom(input io.Reader) {
+	Workers := 1000
+	jobsChannel := make(chan Input)
+	resultsChannel := make(chan Output, Workers)
+
+	var wg sync.WaitGroup
+
+	for count := 0; count < Workers; count++ {
+		go brandPredictWorker(jobsChannel, resultsChannel)
+	}
+	go outputWriter(wg, resultsChannel)
+
+	scanner := bufio.NewScanner(input)
+	var seq = 0
+	for scanner.Scan() {
+		seq++
+		input := Input{
+			Title: scanner.Text(),
+			Seq:   seq,
+		}
+		jobsChannel <- input
+		if seq > 0 && seq%10000 == 0 {
+			fmt.Printf("[DEBUG] Processed %d product titles so far\n", seq)
+		}
+	}
+	for count := 0; count < Workers; count++ {
+		jobsChannel <- Input{Seq: -1}
+	}
+	resultsChannel <- Output{Seq: -1}
+
+	fmt.Printf("[DEBUG] Processed %d product titles in total\n", seq)
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, "reading standard input:", err)
+	}
+	wg.Wait()
+	close(jobsChannel)
+	close(resultsChannel)
+}
+
+func outputWriter(wg sync.WaitGroup, resultsChannel chan Output) {
+	var running = true
+	for running {
+		select {
+		case output := <-resultsChannel:
+			wg.Add(1)
+			if output.Seq == -1 {
+				running = false
+				wg.Done()
+			} else {
+				fmt.Printf("%d\t%d\n", output.BrandId, output.Seq)
+			}
+		}
+	}
+}
+
+func brandPredictWorker(jobs <-chan Input, output chan<- Output) {
+	var running = true
+	for running {
+		select {
+		case job := <-jobs:
+			if job.Seq == -1 {
+				running = false
+			} else {
+				brandID, _ := predictBrand(job.Title)
+				// fmt.Printf("%d\t%v\n", brandID, score)
+				op := Output{
+					BrandId: brandID,
+					Seq:     job.Seq,
+				}
+				output <- op
+			}
+		}
+	}
+}
 
 func predictBrand(input string) (int, float64) {
 	bagOfWordsForInput := computeBagOfWordsFor(input)
@@ -135,7 +213,8 @@ func readAndTrainDataset(input string) []*TrainDataset {
 		}
 
 		length := len(dataset)
-		if length > 0 && length%1000 == 0 {
+		if length > 0 && length%10000 == 0 {
+			// if length > 0 && length%1000 == 0 {
 			// if length > 0 {
 			fmt.Printf("Processed %d lines so far\n", length)
 		}
