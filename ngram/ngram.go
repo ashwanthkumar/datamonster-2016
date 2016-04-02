@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Tokenize - Tokenize the input into n-gram tokens
+// Tokenize - Tokenize the input into nth-gram tokens
 func Tokenize(n int, input string) ([]string, error) {
 	if n < 1 {
 		return []string{}, errors.New("assertion failed: n > 0")
