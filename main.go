@@ -74,8 +74,8 @@ type Input struct {
 
 func predictFrom(input io.Reader) {
 	Workers := 1000
-	jobsChannel := make(chan Input)
-	resultsChannel := make(chan Output, Workers)
+	jobsChannel := make(chan Input, 5*Workers)
+	resultsChannel := make(chan Output, 5*Workers)
 
 	var wg sync.WaitGroup
 
