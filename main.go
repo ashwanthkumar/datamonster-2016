@@ -18,7 +18,7 @@ import (
 
 const (
 	// MaxNgrams - maximum ngrams to create for titles
-	MaxNgrams = 3
+	MaxNgrams = 2
 	// MaxItemsInBag - maximum number of most occuring items to keep in each bag
 	MaxItemsInBag = 500
 )
@@ -49,16 +49,16 @@ func main() {
 	}
 	go outputWriter(wg, resultsChannel)
 
-	// LEARNING STARTS
-	readAndTrainDataset(trainDataset)
-	// LEARNING ENDS
-
-	// PREDICTION STARTS
+	// PREDICTION TYPE1 STARTS
 	// dataset := readAndTrainDataset(trainDataset)
 	// predictFromDataset(dataset, jobsChannel)
+	// PREDICTION TYPE1 ENDS
+
+	// PREDICTION TYPE2 STARTS
+	readAndTrainDataset(trainDataset)
 	file, _ := os.Open(testDataset)
 	predictFrom(file, jobsChannel)
-	// PREDICTION ENDS
+	// PREDICTION TYPE2 ENDS
 
 	for count := 0; count < Workers; count++ {
 		jobsChannel <- Input{Seq: -1}
