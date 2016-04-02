@@ -38,14 +38,10 @@ func main() {
 	trainDataset := os.Args[1]
 	testDataset := os.Args[2]
 	readAndTrainDataset(trainDataset)
-	// dataset := readAndTrainDataset("datasets/classification_train.tsv")
-	// dataset := readAndTrainDataset("datasets/xaa_small")
-	// length := len(dataset)
+	// dataset := readAndTrainDataset(trainDataset)
 	// predictFromDataset(dataset)
-	// predictFrom(os.Stdin)
 	file, _ := os.Open(testDataset)
 	predictFrom(file)
-	// fmt.Printf("%v\n", BrandTokens)
 }
 
 func predictFromDataset(dataset []*TrainDataset) {
