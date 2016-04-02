@@ -18,9 +18,9 @@ import (
 
 const (
 	// MaxNgrams - maximum ngrams to create for titles
-	MaxNgrams = 2
+	MaxNgrams = 3
 	// MaxItemsInBag - maximum number of most occuring items to keep in each bag
-	MaxItemsInBag = 250
+	MaxItemsInBag = 500
 )
 
 // BrandTokens - Contains the Bag of words of all brands as branId -> sets.Set
