@@ -4,3 +4,6 @@ import:
   subpackages:
   - assert
 - package: github.com/lestrrat/go-ngram
+- package: github.com/ashwanthkumar/golang-utils
+  subpackages:
+  - sets
