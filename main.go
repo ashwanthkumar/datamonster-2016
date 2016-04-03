@@ -242,7 +242,15 @@ func createBagOfWords(input string) hset.MapSetBasedHeap {
 			fmt.Printf("Input Line - %s\n", input)
 			panic(err)
 		}
-		ngrams = append(ngrams, tokens...)
+
+		tokenSize := len(tokens)
+		if tokenSize > 3 {
+			start, end := tokens[:3], tokens[tokenSize-3:]
+			ngrams = append(ngrams, start...)
+			ngrams = append(ngrams, end...)
+		} else {
+			ngrams = append(ngrams, tokens...)
+		}
 	}
 	bagOfWords := hset.FromSlice(ngrams)
 	// strip the stop words from the list
