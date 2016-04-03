@@ -20,7 +20,9 @@ const (
 	// MaxNgrams - maximum ngrams to create for titles
 	MaxNgrams = 2
 	// MaxItemsInBag - maximum number of most occuring items to keep in each bag
-	MaxItemsInBag = 500
+	MaxItemsInBag = 1500
+	// BrandCountCutOff - Words lesser than this many occurances are ignored
+	BrandCountCutOff = 100
 )
 
 // BrandTokens - Contains the Bag of words of all brands as branId -> sets.Set
@@ -37,6 +39,11 @@ func init() {
 func main() {
 	trainDataset := os.Args[1]
 	testDataset := os.Args[2]
+	brandDistributionFile := os.Args[3]
+
+	fmt.Printf("Train Dataset = %s\n", trainDataset)
+	fmt.Printf("Test Dataset = %s\n", testDataset)
+	fmt.Printf("BrandDistribution = %s\n", brandDistributionFile)
 
 	Workers := 1000
 	jobsChannel := make(chan Input)
@@ -45,25 +52,25 @@ func main() {
 	var wg sync.WaitGroup
 
 	for count := 0; count < Workers; count++ {
-		go brandPredictWorker(jobsChannel, resultsChannel)
+		go brandPredictWorker(wg, jobsChannel, resultsChannel)
 	}
-	go outputWriter(wg, resultsChannel)
+	go outputWriter(resultsChannel)
 
 	// PREDICTION TYPE1 STARTS
-	// dataset := readAndTrainDataset(trainDataset)
+	// dataset := readAndTrainDataset(trainDataset, brandDistributionFile)
 	// predictFromDataset(dataset, jobsChannel)
 	// PREDICTION TYPE1 ENDS
 
 	// PREDICTION TYPE2 STARTS
-	readAndTrainDataset(trainDataset)
+	readAndTrainDataset(trainDataset, brandDistributionFile)
 	file, _ := os.Open(testDataset)
+	defer file.Close()
 	predictFrom(file, jobsChannel)
 	// PREDICTION TYPE2 ENDS
 
 	for count := 0; count < Workers; count++ {
 		jobsChannel <- Input{Seq: -1}
 	}
-	resultsChannel <- Output{Seq: -1}
 	wg.Wait()
 	close(jobsChannel)
 	close(resultsChannel)
@@ -107,9 +114,12 @@ func predictFrom(input io.Reader, jobsChannel chan Input) {
 		if seq > 0 && seq%10000 == 0 {
 			fmt.Printf("[DEBUG] Processed %d product titles so far\n", seq)
 		}
+		item := newDataset(scanner.Text())
+		// item := newTestDataset(scanner.Text())
 		input := Input{
-			Title: scanner.Text(),
-			Seq:   seq,
+			Title:         item.Title,
+			Seq:           seq,
+			ExpectedBrand: item.Brand,
 		}
 		jobsChannel <- input
 	}
@@ -120,15 +130,13 @@ func predictFrom(input io.Reader, jobsChannel chan Input) {
 	}
 }
 
-func outputWriter(wg sync.WaitGroup, resultsChannel chan Output) {
+func outputWriter(resultsChannel chan Output) {
 	var running = true
 	for running {
 		select {
 		case output := <-resultsChannel:
-			wg.Add(1)
 			if output.Seq == -1 {
 				running = false
-				wg.Done()
 			} else {
 				// fmt.Printf("%d\t%d\n", output.BrandId, output.Seq)
 				fmt.Printf("%d\t%d\t%v\t%v\n", output.BrandId, output.ExpectedBrand, output.Seq, output.BrandId == output.ExpectedBrand)
@@ -137,13 +145,15 @@ func outputWriter(wg sync.WaitGroup, resultsChannel chan Output) {
 	}
 }
 
-func brandPredictWorker(jobs <-chan Input, output chan<- Output) {
+func brandPredictWorker(wg sync.WaitGroup, jobs <-chan Input, output chan<- Output) {
+	wg.Add(1)
 	var running = true
 	for running {
 		select {
 		case job := <-jobs:
 			if job.Seq == -1 {
 				running = false
+				wg.Done()
 			} else {
 				brandID, _ := predictBrand(job.Title)
 				// fmt.Printf("%d\t%v\n", brandID, score)
@@ -190,16 +200,42 @@ func computeBagOfWordsFor(input string) hset.MapSetBasedHeap {
 	var ngrams []string
 	for n := 1; n <= MaxNgrams; n++ {
 		tokens, err := ngram.Tokenize(n, input)
+		// tokens, err := ngram.NewTokenize(n, input).Tokens
 		if err != nil {
 			fmt.Printf("Input Line - %s\n", input)
 			panic(err)
 		}
 		ngrams = append(ngrams, tokens...)
 	}
-	return hset.FromSlice(ngrams)
+	bagOfWords := hset.FromSlice(ngrams)
+	// strip the stop words from the list
+	for _, stopWord := range StopWords.Values() {
+		bagOfWords.Remove(stopWord)
+	}
+
+	return bagOfWords
 }
 
-func readAndTrainDataset(input string) []*TrainDataset {
+func readBrandDistribution(brandDistributionFile string) map[int]int {
+	file, err := os.Open(brandDistributionFile)
+	defer file.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	var brandCounts = make(map[int]int)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// count -> brandId
+		tokens := strings.Split(line, " ")
+		brandCounts[toInt(tokens[1])] = toInt(tokens[0])
+	}
+
+	return brandCounts
+}
+
+func readAndTrainDataset(input, brandDistributionFile string) []*TrainDataset {
 	file, err := os.Open(input)
 	defer file.Close()
 	if err != nil {
@@ -207,9 +243,14 @@ func readAndTrainDataset(input string) []*TrainDataset {
 	}
 
 	var dataset []*TrainDataset
+	var brandDistributions = readBrandDistribution(brandDistributionFile)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		item := newDataset(scanner.Text())
+		if brandDistributions[item.Brand] < BrandCountCutOff {
+			continue
+		}
+
 		dataset = append(dataset, item)
 
 		bagOfWords, exists := BrandTokens[item.Brand]
@@ -233,6 +274,8 @@ func readAndTrainDataset(input string) []*TrainDataset {
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, "reading from "+input+": ", err)
 	}
+	length := len(dataset)
+	fmt.Printf("Processed %d lines so far\n", length)
 
 	fmt.Println("Building Inverted Index")
 	// Build the Inverted index on words
@@ -261,6 +304,14 @@ func newDataset(line string) *TrainDataset {
 		Title:    tokens[0],
 		Brand:    toInt(tokens[1]),
 		Category: toInt(tokens[2]),
+	}
+}
+
+func newTestDataset(line string) *TrainDataset {
+	tokens := strings.Split(line, "\t")
+	return &TrainDataset{
+		Title:    tokens[0],
+		Category: toInt(tokens[1]),
 	}
 }
 
