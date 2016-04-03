@@ -13,7 +13,8 @@ import (
 	"container/heap"
 
 	"github.com/ashwanthkumar/datamonster_2016/hset"
-	"github.com/ashwanthkumar/datamonster_2016/ngram"
+	myngram "github.com/ashwanthkumar/datamonster_2016/ngram"
+	ngram "github.com/lestrrat/go-ngram"
 )
 
 const (
@@ -205,9 +206,37 @@ func predictBrand(input string) (int, float64) {
 }
 
 func computeBagOfWordsFor(input string) hset.MapSetBasedHeap {
+	return createBagOfWords(input)
+	// return createTokenBasedNGrams(input)
+}
+
+func createTokenBasedNGrams(input string) hset.MapSetBasedHeap {
+	var ngrams []string
+
+	// Clean the stop words from the input
+	inputTokens := hset.FromSlice(strings.Split(input, " "))
+	for _, stopWord := range StopWords.Values() {
+		inputTokens.Remove(stopWord)
+	}
+	cleanedInput := strings.Join(inputTokens.Values(), " ")
+
+	for n := 1; n <= MaxNgrams; n++ {
+		if len(cleanedInput) > n {
+			tokens := ngram.NewTokenize(n, cleanedInput).Tokens()
+			for _, token := range tokens {
+				ngrams = append(ngrams, token.String())
+			}
+		}
+	}
+
+	bagOfWords := hset.FromSlice(ngrams)
+	return bagOfWords
+}
+
+func createBagOfWords(input string) hset.MapSetBasedHeap {
 	var ngrams []string
 	for n := 1; n <= MaxNgrams; n++ {
-		tokens, err := ngram.Tokenize(n, input)
+		tokens, err := myngram.Tokenize(n, input)
 		// tokens, err := ngram.NewTokenize(n, input).Tokens
 		if err != nil {
 			fmt.Printf("Input Line - %s\n", input)
