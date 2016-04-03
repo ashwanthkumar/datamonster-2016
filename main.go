@@ -20,7 +20,7 @@ const (
 	// MaxNgrams - maximum ngrams to create for titles
 	MaxNgrams = 2
 	// MaxItemsInBag - maximum number of most occuring items to keep in each bag
-	MaxItemsInBag = 1500
+	MaxItemsInBag = 5000
 	// BrandCountCutOff - Words lesser than this many occurances are ignored
 	BrandCountCutOff = 100
 )
