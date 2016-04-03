@@ -40,10 +40,12 @@ func main() {
 	trainDataset := os.Args[1]
 	testDataset := os.Args[2]
 	brandDistributionFile := os.Args[3]
+	outputLocation := os.Args[4]
 
 	fmt.Printf("Train Dataset = %s\n", trainDataset)
 	fmt.Printf("Test Dataset = %s\n", testDataset)
 	fmt.Printf("BrandDistribution = %s\n", brandDistributionFile)
+	fmt.Printf("Output Location = %s\n", outputLocation)
 
 	Workers := 1000
 	jobsChannel := make(chan Input)
@@ -54,7 +56,12 @@ func main() {
 	for count := 0; count < Workers; count++ {
 		go brandPredictWorker(wg, jobsChannel, resultsChannel)
 	}
-	go outputWriter(resultsChannel)
+	outputFile, err := os.Create(outputLocation)
+	if err != nil {
+		panic(err)
+	}
+	defer outputFile.Close()
+	go outputWriter(outputFile, resultsChannel)
 
 	// PREDICTION TYPE1 STARTS
 	// dataset := readAndTrainDataset(trainDataset, brandDistributionFile)
@@ -114,8 +121,8 @@ func predictFrom(input io.Reader, jobsChannel chan Input) {
 		if seq > 0 && seq%10000 == 0 {
 			fmt.Printf("[DEBUG] Processed %d product titles so far\n", seq)
 		}
-		item := newDataset(scanner.Text())
-		// item := newTestDataset(scanner.Text())
+		// item := newDataset(scanner.Text())
+		item := newTestDataset(scanner.Text())
 		input := Input{
 			Title:         item.Title,
 			Seq:           seq,
@@ -130,7 +137,7 @@ func predictFrom(input io.Reader, jobsChannel chan Input) {
 	}
 }
 
-func outputWriter(resultsChannel chan Output) {
+func outputWriter(outputFile *os.File, resultsChannel chan Output) {
 	var running = true
 	for running {
 		select {
@@ -139,7 +146,8 @@ func outputWriter(resultsChannel chan Output) {
 				running = false
 			} else {
 				// fmt.Printf("%d\t%d\n", output.BrandId, output.Seq)
-				fmt.Printf("%d\t%d\t%v\t%v\n", output.BrandId, output.ExpectedBrand, output.Seq, output.BrandId == output.ExpectedBrand)
+				fmt.Fprintf(outputFile, "%d\t%d\t%v\t%v\n", output.BrandId, output.ExpectedBrand, output.Seq, output.BrandId == output.ExpectedBrand)
+				// fmt.Printf("%d\t%d\t%v\t%v\n", output.BrandId, output.ExpectedBrand, output.Seq, output.BrandId == output.ExpectedBrand)
 			}
 		}
 	}
